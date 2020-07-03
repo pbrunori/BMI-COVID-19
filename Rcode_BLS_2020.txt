@@ -1,0 +1,122 @@
+  rm(list = ls())
+  bmi<-read.csv("/Users/paolobrunori/Desktop/lancet/samadult.csv")
+  
+  # remove observation with missing information
+  bmi<-bmi[bmi$BMI<9999,]
+  bmi<-bmi[bmi$AHEIGHT<90,]
+  bmi<-bmi[bmi$AWEIGHTP<900,]
+  bmi<-bmi[bmi$AGE>20,]
+  
+  
+  data<-data.frame(bmi$SEX)
+  names(data)[1]<-"sex"
+  data$age<-bmi$AGE_P
+# translate into mt and kg
+  data$height<-bmi$AHEIGHT*0.0254
+  data$weight<-bmi$AWEIGHTP*0.453592
+# calculate BMI
+  data$b<-data$weight/(data$height^2)
+  
+# correlation test in the US population
+  cor.test(data$b, data$age)
+  n<-length(data$b)
+ 
+  
+# stratification based on http://dx.doi.org/10.15585/mmwr.mm6912e2
+
+  sc<-(213.853/265) # to report frequencies to sum to 265
+  
+ fr<-1:6
+ fr[1]<-round((0.02+0.042)*0.5*705/sc)
+ fr[2]<- round((0.054+0.104)*0.5*429/sc)
+ fr[3]<- round((0.047+0.112)*0.5*429/sc)
+ fr[4]<- round((0.081+0.188)*0.5*409/sc)
+ fr[5]<- round((0.105+0.31)*0.5*210/sc)
+ fr[6]<- round((0.063+0.29)*0.5*144/sc)
+
+  data$id<-1:n
+  
+  # linear model in the US population
+  summary(lm(data$b~data$age))
+  
+  # polynomial model (better fit)
+  poli<-lm(data$b~poly(data$age,4))
+  summary(poli)
+  
+# figure 1  
+#  names(data)[5]<-"BMI"
+#  names(data)[2]<-"Age"
+  ggplot(data, aes(x=Age, y=BMI)) +
+    stat_summary(fun.data = 'mean_se')
+  
+
+# simulation
+  
+  nt<-10000 # number of draws
+  tests<-matrix(0,nt,5)
+  
+  set.seed(111)
+  for (i in 1:nt){
+    # stratification
+    s1<-sample(data$id[data$age>20 & data$age<45], fr[1]) 
+    s2<-sample(data$id[data$age>44 & data$age<55], fr[2]) 
+    s3<-sample(data$id[data$age>54 & data$age<65], fr[3]) 
+    s4<-sample(data$id[data$age>64 & data$age<75], fr[4]) 
+    s5<-sample(data$id[data$age>74 & data$age<85], fr[5]) 
+    s6<-sample(data$id[data$age>84 ], fr[6]) 
+    s<-c(s1,s2,s3,s4,s5,s6)
+    sample<-data[s,]
+    sample<-sample[order(sample$age),]
+    ts<-cor.test(sample$age, sample$b)
+    tests[i,1]<-ts$estimate # correlation coefficient
+    tests[i,2]<-ts$p.value # p-value
+    tests[i,3]<-lm(sample$b~sample$age)$coefficients[1] # intercept
+    tests[i,4]<-lm(sample$b~sample$age)$coefficients[2] # slope
+    tests[i,5]<-summary(lm(sample$b~sample$age))$coefficients[2,4] # p-value of slope
+  }
+
+  # distribution of correlation coefficients
+  mean(tests[,1])
+  length(tests[,1][tests[,1]<0])/nt
+  quantile(tests[,1], p=c(0.025, 0.975))
+
+  # distribution of p-value for correlation coefficients
+  mean(tests[,2])
+  length(tests[,2][tests[,2]<0.05])/nt
+
+  # distribution of slopes
+  mean(tests[,4])
+  length(tests[,4][tests[,4]<0])/nt
+  round(quantile(tests[,4]),4)
+  length(tests[,4][tests[,4]<0])/nt
+  
+  # distribution of p-value for slope
+  length(tests[,5][tests[,5]<0.05])/nt
+  round(quantile(tests[,5]),4)
+  round(quantile(tests[,2]),3)
+
+# figure 2
+  # intercept
+  B0<-mean(tests[,3])
+  B0.l<-quantile(tests[,3], p=0.025)
+  B0.h<-quantile(tests[,3], p=0.975)
+  # slope
+  B1<-mean(tests[,4])
+
+
+sample$Sex<-"Male"
+sample$Sex[sample$sex==2]<-"Female"
+  ggplot(sample, aes(x=age, y=b,  color=Sex)) +  xlab("Age")+ ylab("BMI") +
+    geom_point() + geom_abline(intercept = B0, slope = B1, 
+                               linetype="solid", size=0.5) +
+    geom_abline(intercept = B0.l, slope = B1, 
+              linetype="dashed", size=0.5) +
+    geom_abline(intercept = B0.h, slope = B1, 
+                linetype="dashed", size=0.5) + theme(legend.title = element_blank())
+  
+plot(sample$age[sample$sex==1], sample$b[sample$sex==1], col="blue", pch=15, xlim=c(21,85), xlab="Age", ylab="BMI")
+points(sample$age[sample$sex==2], sample$b[sample$sex==2], col="red", pch=15)
+abline(B0, B1)
+abline(B0.l, B1, lty="dashed")
+abline(B0.h, B1, lty="dashed")
+
